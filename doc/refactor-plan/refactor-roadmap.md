@@ -313,6 +313,17 @@ foundation here lets both reuse it. (C++17 itself is set in Phase 1.)
 - **Conventions doc** — captures the naming/layout/extension rules above; the
   **reverse-computation discipline** guide is stubbed now and filled in Phase 4 when
   the RC helpers exist.
+- **Retire the intrusive-list C macros** (candidate, surfaced in Phase 1 B1).
+  `codes/quicklist.h` is a Linux-kernel-style intrusive list — `qlist_entry` is
+  `container_of`, and `typeof(*pos)` recovers the entry's struct type — the classic
+  template-free, type-generic-C idiom. It predates the C++ work and is `#include`d today
+  by *both* C and C++ translation units (1 `.C`, 7 `.c`). Phase 1 B1 changed its
+  `typeof` → `__typeof__` so it survives strict `-std=c++17` (`CMAKE_CXX_EXTENSIONS OFF`);
+  that's a portable stopgap, **not** the end state. The C++ replacement is a `std::`
+  container or a small templated intrusive list, done when the owning data structures are
+  modernized (Phase 4 waves) — at which point `quicklist.h` and the `typeof`/`__typeof__`
+  question delete themselves. A standalone `typeof` → `decltype` swap isn't worth doing
+  before then, and `decltype` can't land while the header is still shared with C sources.
 
 The **Layer-0 ROSS trampoline** (§9.2) and the C++-aware `crv_checkpointer` are
 *designed* by the decisions above but **implemented in Phase 4 Wave 1, against their
