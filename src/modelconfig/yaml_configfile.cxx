@@ -34,8 +34,7 @@
 #include <utility>
 #include <vector>
 
-namespace
-{
+namespace {
 
 /* -------------------------------------------------------------------------
  * ryml plumbing
@@ -44,27 +43,23 @@ namespace
 /* Route ryml parse/lookup errors through tw_error so malformed input aborts
  * with a diagnostic, the same way the rest of the config front-end reports it.
  * ryml requires this callback to never return; tw_error aborts, satisfying it. */
-[[noreturn]] void yaml_error(const char* msg, size_t msg_len, ryml::Location, void*)
-{
+[[noreturn]] void yaml_error(const char* msg, size_t msg_len, ryml::Location, void*) {
     tw_error(TW_LOC, "YAML config error: %.*s", (int)msg_len, msg);
     abort(); /* unreachable; keeps the [[noreturn]] contract explicit */
 }
 
 /* raw scalar text of a node, preserving the exact source spelling */
-std::string scalar(ryml::ConstNodeRef n)
-{
+std::string scalar(ryml::ConstNodeRef n) {
     ryml::csubstr v = n.val();
     return std::string(v.str, v.len);
 }
 
-std::string key_of(ryml::ConstNodeRef n)
-{
+std::string key_of(ryml::ConstNodeRef n) {
     ryml::csubstr k = n.key();
     return std::string(k.str, k.len);
 }
 
-bool has(ryml::ConstNodeRef n, const char* key)
-{
+bool has(ryml::ConstNodeRef n, const char* key) {
     return n.readable() && n.is_map() && n.has_child(ryml::to_csubstr(key));
 }
 
@@ -75,49 +70,43 @@ bool has(ryml::ConstNodeRef n, const char* key)
 using kv_list = std::vector<std::pair<std::string, std::string>>;
 
 /* A custom component: a model paired with configured parameters. */
-struct component
-{
-    std::string key;      /* the components: key referenced by nodes / hosts */
-    std::string model;    /* ComponentModel name (nw-lp, simplep2p, dragonfly, ...) */
-    std::string network;  /* enumerated flat models: the NIC model a compute node
+struct component {
+    std::string key;     /* the components: key referenced by nodes / hosts */
+    std::string model;   /* ComponentModel name (nw-lp, simplep2p, dragonfly, ...) */
+    std::string network; /* enumerated flat models: the NIC model a compute node
                              runs its workload over (e.g. simplenet, simplep2p) */
-    kv_list params;       /* scalar model params, raw text, in source order */
+    kv_list params;      /* scalar model params, raw text, in source order */
 };
 
 /* A placed component in an enumerated (Cytoscape) topology. */
-struct node
-{
+struct node {
     std::string id;
-    std::string component;  /* references a components: key */
+    std::string component; /* references a components: key */
 };
 
 /* A per-link-class parameter block (e.g. dragonfly local/global/cn). */
-struct link_class
-{
-    std::string name;   /* class name; combines with each param as <name>_<param> */
+struct link_class {
+    std::string name; /* class name; combines with each param as <name>_<param> */
     kv_list params;
 };
 
 /* A parametric fabric: an HPC topology described by shape parameters. */
-struct fabric
-{
-    std::string model;              /* network model, e.g. "dragonfly" */
-    kv_list shape;                  /* shape parameters (also drive count derivation) */
-    std::vector<link_class> links;  /* per-link-class bandwidth / vc_size */
-    kv_list routing;                /* routing.* (algorithm maps to PARAMS "routing") */
-    kv_list extra;                  /* other scalar fabric keys -> PARAMS verbatim */
-    std::string hosts_component;    /* hosts.component: the per-terminal workload */
+struct fabric {
+    std::string model;             /* network model, e.g. "dragonfly" */
+    kv_list shape;                 /* shape parameters (also drive count derivation) */
+    std::vector<link_class> links; /* per-link-class bandwidth / vc_size */
+    kv_list routing;               /* routing.* (algorithm maps to PARAMS "routing") */
+    kv_list extra;                 /* other scalar fabric keys -> PARAMS verbatim */
+    std::string hosts_component;   /* hosts.component: the per-terminal workload */
 };
 
-struct config
-{
+struct config {
     std::vector<component> components;
     bool parametric = false;
-    fabric fab;               /* parametric topology */
-    std::vector<node> nodes;  /* enumerated topology */
+    fabric fab;              /* parametric topology */
+    std::vector<node> nodes; /* enumerated topology */
 
-    const component* find_component(const std::string& k) const
-    {
+    const component* find_component(const std::string& k) const {
         for (const component& c : components)
             if (c.key == k)
                 return &c;
@@ -130,13 +119,12 @@ struct config
  * modelnet_order method names, and shape->counts derivation the model expects.
  * ---------------------------------------------------------------------- */
 
-struct fabric_model
-{
-    const char* name;             /* friendly name used in fabric.model */
-    const char* terminal_lp;      /* LPGROUPS lp-type name for the NIC/terminal */
-    const char* router_lp;        /* LPGROUPS lp-type name for the router */
-    const char* term_method;      /* modelnet_order method name for the terminal */
-    const char* router_method;    /* modelnet_order method name for the router */
+struct fabric_model {
+    const char* name;          /* friendly name used in fabric.model */
+    const char* terminal_lp;   /* LPGROUPS lp-type name for the NIC/terminal */
+    const char* router_lp;     /* LPGROUPS lp-type name for the router */
+    const char* term_method;   /* modelnet_order method name for the terminal */
+    const char* router_method; /* modelnet_order method name for the router */
 
     /* Derive the layout from the shape parameters: total router repetitions and
      * the number of compute-node terminals per router. */
@@ -144,8 +132,7 @@ struct fabric_model
 };
 
 /* Look up a shape value by name, aborting if absent. */
-long shape_int(const kv_list& shape, const char* key)
-{
+long shape_int(const kv_list& shape, const char* key) {
     for (const auto& kv : shape)
         if (kv.first == key)
             return strtol(kv.second.c_str(), nullptr, 10);
@@ -156,8 +143,7 @@ long shape_int(const kv_list& shape, const char* key)
 /* Regular (Kim-Dally) dragonfly: every count follows from num_routers, the
  * number of routers per group -- the same derivation the model does internally
  * (num_cn = num_routers/2, num_groups = num_routers*num_cn + 1). */
-void derive_dragonfly(const kv_list& shape, long& repetitions, long& cns_per_router)
-{
+void derive_dragonfly(const kv_list& shape, long& repetitions, long& cns_per_router) {
     long num_routers = shape_int(shape, "num_routers");
     if (num_routers <= 0)
         tw_error(TW_LOC, "YAML config error: dragonfly num_routers must be positive");
@@ -172,8 +158,7 @@ const fabric_model fabric_models[] = {
      "dragonfly_router", derive_dragonfly},
 };
 
-const fabric_model* find_fabric_model(const std::string& name)
-{
+const fabric_model* find_fabric_model(const std::string& name) {
     for (const fabric_model& m : fabric_models)
         if (name == m.name)
             return &m;
@@ -183,11 +168,10 @@ const fabric_model* find_fabric_model(const std::string& name)
 /* A flat (enumerated) network model: one NIC LP per compute node, all peers.
  * Maps a friendly network name to the LPGROUPS lp-type name and the
  * modelnet_order method name the model registers. */
-struct network_model
-{
-    const char* name;       /* friendly name used in a component's network: field */
-    const char* nic_lp;     /* LPGROUPS lp-type name for the NIC */
-    const char* method;     /* modelnet_order method name */
+struct network_model {
+    const char* name;   /* friendly name used in a component's network: field */
+    const char* nic_lp; /* LPGROUPS lp-type name for the NIC */
+    const char* method; /* modelnet_order method name */
 };
 
 const network_model network_models[] = {
@@ -195,8 +179,7 @@ const network_model network_models[] = {
     {"simplep2p", "modelnet_simplep2p", "simplep2p"},
 };
 
-const network_model* find_network_model(const std::string& name)
-{
+const network_model* find_network_model(const std::string& name) {
     for (const network_model& m : network_models)
         if (name == m.name)
             return &m;
@@ -207,16 +190,13 @@ const network_model* find_network_model(const std::string& name)
  * Parse: ryml tree -> IR
  * ---------------------------------------------------------------------- */
 
-void parse_components(ryml::ConstNodeRef root, config& cfg)
-{
+void parse_components(ryml::ConstNodeRef root, config& cfg) {
     if (!has(root, "components"))
         return;
-    for (ryml::ConstNodeRef cnode : root["components"].children())
-    {
+    for (ryml::ConstNodeRef cnode : root["components"].children()) {
         component c;
         c.key = key_of(cnode);
-        for (ryml::ConstNodeRef f : cnode.children())
-        {
+        for (ryml::ConstNodeRef f : cnode.children()) {
             std::string k = key_of(f);
             if (k == "model")
                 c.model = scalar(f);
@@ -233,42 +213,31 @@ void parse_components(ryml::ConstNodeRef root, config& cfg)
     }
 }
 
-void parse_fabric(ryml::ConstNodeRef fnode, fabric& fab)
-{
-    for (ryml::ConstNodeRef c : fnode.children())
-    {
+void parse_fabric(ryml::ConstNodeRef fnode, fabric& fab) {
+    for (ryml::ConstNodeRef c : fnode.children()) {
         std::string k = key_of(c);
         if (k == "model")
             fab.model = scalar(c);
-        else if (k == "shape")
-        {
+        else if (k == "shape") {
             for (ryml::ConstNodeRef s : c.children())
                 fab.shape.emplace_back(key_of(s), scalar(s));
-        }
-        else if (k == "links")
-        {
-            for (ryml::ConstNodeRef lc : c.children())
-            {
+        } else if (k == "links") {
+            for (ryml::ConstNodeRef lc : c.children()) {
                 link_class cls;
                 cls.name = key_of(lc);
                 for (ryml::ConstNodeRef p : lc.children())
                     cls.params.emplace_back(key_of(p), scalar(p));
                 fab.links.push_back(std::move(cls));
             }
-        }
-        else if (k == "routing")
-        {
+        } else if (k == "routing") {
             for (ryml::ConstNodeRef r : c.children())
                 fab.routing.emplace_back(key_of(r), scalar(r));
-        }
-        else if (k == "connections")
-        {
+        } else if (k == "connections") {
             /* file-enumerated dragonflies reference the binary connection files
              * by path; pass each through to PARAMS verbatim. */
             for (ryml::ConstNodeRef cn : c.children())
                 fab.extra.emplace_back(key_of(cn), scalar(cn));
-        }
-        else if (c.is_keyval())
+        } else if (c.is_keyval())
             fab.extra.emplace_back(k, scalar(c));
     }
 }
@@ -278,12 +247,10 @@ void parse_fabric(ryml::ConstNodeRef fnode, fabric& fab)
  * Edges describe connectivity/link rates for future WAN models; the flat models
  * here take their link table from a referenced matrix file, so edges are parsed
  * past but not consumed. */
-void parse_nodes(ryml::ConstNodeRef elements, config& cfg)
-{
+void parse_nodes(ryml::ConstNodeRef elements, config& cfg) {
     if (!has(elements, "nodes"))
         tw_error(TW_LOC, "YAML config error: cytoscape elements need a \"nodes\" list");
-    for (ryml::ConstNodeRef n : elements["nodes"].children())
-    {
+    for (ryml::ConstNodeRef n : elements["nodes"].children()) {
         ryml::ConstNodeRef data = has(n, "data") ? n["data"] : n;
         node nd;
         if (has(data, "id"))
@@ -296,8 +263,7 @@ void parse_nodes(ryml::ConstNodeRef elements, config& cfg)
     }
 }
 
-void parse_topology(ryml::ConstNodeRef root, config& cfg)
-{
+void parse_topology(ryml::ConstNodeRef root, config& cfg) {
     if (!has(root, "topology"))
         tw_error(TW_LOC, "YAML config error: missing required \"topology\" block");
     ryml::ConstNodeRef topo = root["topology"];
@@ -306,30 +272,24 @@ void parse_topology(ryml::ConstNodeRef root, config& cfg)
     if (has(topo, "format"))
         format = scalar(topo["format"]);
 
-    if (format == "parametric")
-    {
+    if (format == "parametric") {
         cfg.parametric = true;
         if (!has(topo, "fabric"))
             tw_error(TW_LOC, "YAML config error: parametric topology needs a \"fabric\" block");
         parse_fabric(topo["fabric"], cfg.fab);
         if (has(topo, "hosts") && has(topo["hosts"], "component"))
             cfg.fab.hosts_component = scalar(topo["hosts"]["component"]);
-    }
-    else if (format == "cytoscape" || format.empty())
-    {
+    } else if (format == "cytoscape" || format.empty()) {
         if (has(topo, "elements"))
             parse_nodes(topo["elements"], cfg);
         else
             tw_error(TW_LOC, "YAML config error: cytoscape topology needs an \"elements\" block");
-    }
-    else
-    {
+    } else {
         tw_error(TW_LOC, "YAML config error: unknown topology format \"%s\"", format.c_str());
     }
 }
 
-config parse(const char* data, size_t len)
-{
+config parse(const char* data, size_t len) {
     ryml::set_callbacks(ryml::Callbacks(nullptr, nullptr, nullptr, yaml_error));
 
     /* copy into a mutable buffer ryml can own; parse_in_arena keeps the source
@@ -348,15 +308,13 @@ config parse(const char* data, size_t len)
  * Compile: IR -> ConfigVTable
  * ---------------------------------------------------------------------- */
 
-void put_key(ConfigVTable* cf, SectionHandle sec, const std::string& key, const std::string& val)
-{
+void put_key(ConfigVTable* cf, SectionHandle sec, const std::string& key, const std::string& val) {
     const char* v = val.c_str();
     cf_createKey(cf, sec, key.c_str(), &v, 1);
 }
 
 /* Compile a parametric fabric into LPGROUPS + PARAMS. */
-void compile_fabric(const config& cfg, ConfigVTable* cf)
-{
+void compile_fabric(const config& cfg, ConfigVTable* cf) {
     const fabric& fab = cfg.fab;
 
     const fabric_model* model = find_fabric_model(fab.model);
@@ -419,8 +377,7 @@ void compile_fabric(const config& cfg, ConfigVTable* cf)
 /* Compile an enumerated (Cytoscape) topology of flat compute nodes into
  * LPGROUPS + PARAMS. Each node is one repetition running its workload LP over a
  * NIC LP; all nodes reference the same compute-node component. */
-void compile_enumerated(const config& cfg, ConfigVTable* cf)
-{
+void compile_enumerated(const config& cfg, ConfigVTable* cf) {
     if (cfg.nodes.empty())
         tw_error(TW_LOC, "YAML config error: enumerated topology has no nodes");
 
@@ -474,8 +431,7 @@ void compile_enumerated(const config& cfg, ConfigVTable* cf)
  * C entry point
  * ---------------------------------------------------------------------- */
 
-extern "C" struct ConfigVTable* yaml_configfile_load(const char* data, size_t len)
-{
+extern "C" struct ConfigVTable* yaml_configfile_load(const char* data, size_t len) {
     config cfg = parse(data, len);
 
     ConfigVTable* cf = cfsa_create_empty();
