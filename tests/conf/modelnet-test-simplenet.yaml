@@ -1,0 +1,37 @@
+schema_version: 1
+
+# YAML twin of modelnet-test.conf: sixteen peer compute nodes running a workload
+# over a simplenet NIC. simplenet is a flat all-to-all model with a uniform
+# startup latency and bandwidth, so there is no matrix file -- the net params sit
+# directly on the component.
+
+components:
+  compute_node:
+    model: nw-lp
+    network: simplenet
+    packet_size: 512
+    message_size: 464
+    modelnet_scheduler: fcfs
+    net_startup_ns: 1.5
+    net_bw_mbps: 20000
+
+topology:
+  format: cytoscape
+  elements:
+    nodes:
+      - data: { id: n0,  component: compute_node }
+      - data: { id: n1,  component: compute_node }
+      - data: { id: n2,  component: compute_node }
+      - data: { id: n3,  component: compute_node }
+      - data: { id: n4,  component: compute_node }
+      - data: { id: n5,  component: compute_node }
+      - data: { id: n6,  component: compute_node }
+      - data: { id: n7,  component: compute_node }
+      - data: { id: n8,  component: compute_node }
+      - data: { id: n9,  component: compute_node }
+      - data: { id: n10, component: compute_node }
+      - data: { id: n11, component: compute_node }
+      - data: { id: n12, component: compute_node }
+      - data: { id: n13, component: compute_node }
+      - data: { id: n14, component: compute_node }
+      - data: { id: n15, component: compute_node }

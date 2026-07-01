@@ -77,9 +77,18 @@ using kv_list = std::vector<std::pair<std::string, std::string>>;
 /* A custom component: a model paired with configured parameters. */
 struct component
 {
-    std::string key;    /* the components: key referenced by nodes / hosts */
-    std::string model;  /* ComponentModel name (nw-lp, simplep2p, dragonfly, ...) */
-    kv_list params;     /* scalar model params, raw text, in source order */
+    std::string key;      /* the components: key referenced by nodes / hosts */
+    std::string model;    /* ComponentModel name (nw-lp, simplep2p, dragonfly, ...) */
+    std::string network;  /* enumerated flat models: the NIC model a compute node
+                             runs its workload over (e.g. simplenet, simplep2p) */
+    kv_list params;       /* scalar model params, raw text, in source order */
+};
+
+/* A placed component in an enumerated (Cytoscape) topology. */
+struct node
+{
+    std::string id;
+    std::string component;  /* references a components: key */
 };
 
 /* A per-link-class parameter block (e.g. dragonfly local/global/cn). */
@@ -104,7 +113,8 @@ struct config
 {
     std::vector<component> components;
     bool parametric = false;
-    fabric fab;
+    fabric fab;               /* parametric topology */
+    std::vector<node> nodes;  /* enumerated topology */
 
     const component* find_component(const std::string& k) const
     {
@@ -170,6 +180,29 @@ const fabric_model* find_fabric_model(const std::string& name)
     return nullptr;
 }
 
+/* A flat (enumerated) network model: one NIC LP per compute node, all peers.
+ * Maps a friendly network name to the LPGROUPS lp-type name and the
+ * modelnet_order method name the model registers. */
+struct network_model
+{
+    const char* name;       /* friendly name used in a component's network: field */
+    const char* nic_lp;     /* LPGROUPS lp-type name for the NIC */
+    const char* method;     /* modelnet_order method name */
+};
+
+const network_model network_models[] = {
+    {"simplenet", "modelnet_simplenet", "simplenet"},
+    {"simplep2p", "modelnet_simplep2p", "simplep2p"},
+};
+
+const network_model* find_network_model(const std::string& name)
+{
+    for (const network_model& m : network_models)
+        if (name == m.name)
+            return &m;
+    return nullptr;
+}
+
 /* -------------------------------------------------------------------------
  * Parse: ryml tree -> IR
  * ---------------------------------------------------------------------- */
@@ -187,6 +220,8 @@ void parse_components(ryml::ConstNodeRef root, config& cfg)
             std::string k = key_of(f);
             if (k == "model")
                 c.model = scalar(f);
+            else if (k == "network")
+                c.network = scalar(f);
             else if (k == "type")
                 ; /* inferred from the model; not needed for the compiled config */
             else if (f.is_keyval())
@@ -238,6 +273,29 @@ void parse_fabric(ryml::ConstNodeRef fnode, fabric& fab)
     }
 }
 
+/* Read the nodes from a Cytoscape elements block. Accepts the object form
+ * ({ nodes: [...], edges: [...] }); each node carries its fields under `data`.
+ * Edges describe connectivity/link rates for future WAN models; the flat models
+ * here take their link table from a referenced matrix file, so edges are parsed
+ * past but not consumed. */
+void parse_nodes(ryml::ConstNodeRef elements, config& cfg)
+{
+    if (!has(elements, "nodes"))
+        tw_error(TW_LOC, "YAML config error: cytoscape elements need a \"nodes\" list");
+    for (ryml::ConstNodeRef n : elements["nodes"].children())
+    {
+        ryml::ConstNodeRef data = has(n, "data") ? n["data"] : n;
+        node nd;
+        if (has(data, "id"))
+            nd.id = scalar(data["id"]);
+        if (has(data, "component"))
+            nd.component = scalar(data["component"]);
+        else
+            tw_error(TW_LOC, "YAML config error: node \"%s\" has no component", nd.id.c_str());
+        cfg.nodes.push_back(std::move(nd));
+    }
+}
+
 void parse_topology(ryml::ConstNodeRef root, config& cfg)
 {
     if (!has(root, "topology"))
@@ -257,11 +315,16 @@ void parse_topology(ryml::ConstNodeRef root, config& cfg)
         if (has(topo, "hosts") && has(topo["hosts"], "component"))
             cfg.fab.hosts_component = scalar(topo["hosts"]["component"]);
     }
+    else if (format == "cytoscape" || format.empty())
+    {
+        if (has(topo, "elements"))
+            parse_nodes(topo["elements"], cfg);
+        else
+            tw_error(TW_LOC, "YAML config error: cytoscape topology needs an \"elements\" block");
+    }
     else
     {
-        tw_error(TW_LOC,
-                 "YAML config error: enumerated topologies are not yet supported by this "
-                 "front-end; use topology.format: parametric");
+        tw_error(TW_LOC, "YAML config error: unknown topology format \"%s\"", format.c_str());
     }
 }
 
@@ -353,6 +416,58 @@ void compile_fabric(const config& cfg, ConfigVTable* cf)
         put_key(cf, params, kv.first, kv.second);
 }
 
+/* Compile an enumerated (Cytoscape) topology of flat compute nodes into
+ * LPGROUPS + PARAMS. Each node is one repetition running its workload LP over a
+ * NIC LP; all nodes reference the same compute-node component. */
+void compile_enumerated(const config& cfg, ConfigVTable* cf)
+{
+    if (cfg.nodes.empty())
+        tw_error(TW_LOC, "YAML config error: enumerated topology has no nodes");
+
+    /* One homogeneous compute-node component for now; heterogeneous regions are
+     * the multi-network work. */
+    const std::string& comp_key = cfg.nodes.front().component;
+    for (const node& n : cfg.nodes)
+        if (n.component != comp_key)
+            tw_error(TW_LOC,
+                     "YAML config error: enumerated topologies with more than one component are "
+                     "not yet supported (node \"%s\" uses \"%s\", expected \"%s\")",
+                     n.id.c_str(), n.component.c_str(), comp_key.c_str());
+
+    const component* comp = cfg.find_component(comp_key);
+    if (!comp)
+        tw_error(TW_LOC,
+                 "YAML config error: node component \"%s\" is not defined under components:",
+                 comp_key.c_str());
+    if (comp->network.empty())
+        tw_error(TW_LOC,
+                 "YAML config error: component \"%s\" needs a network: field naming its NIC model",
+                 comp_key.c_str());
+
+    const network_model* net = find_network_model(comp->network);
+    if (!net)
+        tw_error(TW_LOC, "YAML config error: unknown network model \"%s\"", comp->network.c_str());
+
+    /* --- LPGROUPS: one repetition per node, each a workload LP + its NIC LP,
+     * emitted in [workload, NIC] order to match the model's layout. --- */
+    SectionHandle lpgroups, grp;
+    cf_createSection(cf, ROOT_SECTION, "LPGROUPS", &lpgroups);
+    cf_createSection(cf, lpgroups, "MODELNET_GRP", &grp);
+    put_key(cf, grp, "repetitions", std::to_string(cfg.nodes.size()));
+    put_key(cf, grp, comp->model, "1");
+    put_key(cf, grp, net->nic_lp, "1");
+
+    /* --- PARAMS: modelnet_order is derived from the network model; the
+     * component's params (message_size, packet_size, matrix-file references,
+     * ...) pass straight through. --- */
+    SectionHandle params;
+    cf_createSection(cf, ROOT_SECTION, "PARAMS", &params);
+    const char* order[1] = {net->method};
+    cf_createKey(cf, params, "modelnet_order", order, 1);
+    for (const auto& kv : comp->params)
+        put_key(cf, params, kv.first, kv.second);
+}
+
 } // namespace
 
 /* -------------------------------------------------------------------------
@@ -366,6 +481,8 @@ extern "C" struct ConfigVTable* yaml_configfile_load(const char* data, size_t le
     ConfigVTable* cf = cfsa_create_empty();
     if (cfg.parametric)
         compile_fabric(cfg, cf);
+    else
+        compile_enumerated(cfg, cf);
 
     return cf;
 }
