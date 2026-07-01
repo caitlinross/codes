@@ -20,6 +20,7 @@
 #cmakedefine01 CODES_HAVE_TORCH
 #cmakedefine01 CODES_HAVE_ZEROMQ
 #cmakedefine01 CODES_HAVE_DARSHAN
+#cmakedefine01 CODES_HAVE_YAML
 
 // Data-install paths used by the SWM / UNION online-workload backends.
 #define SWM_DATAROOTDIR "${SWM_DATAROOTDIR}"

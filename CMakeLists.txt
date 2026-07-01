@@ -126,7 +126,11 @@ set(CODES_USE_RECORDER AUTO CACHE STRING "Recorder I/O workload, no external dep
 set(CODES_USE_TORCH    AUTO CACHE STRING "Torch ML models (AUTO/ON/OFF)")
 set(CODES_USE_DARSHAN  OFF  CACHE STRING "Darshan I/O workload — not yet wired (AUTO/ON/OFF)")
 set(CODES_USE_ZEROMQ   AUTO CACHE STRING "ZeroMQ director-client/zmqml surrogate; needs libzmq + zmq.hpp + rapidjson (AUTO/ON/OFF)")
-foreach(_dep DUMPI SWM UNION RECORDER TORCH DARSHAN ZEROMQ)
+# YAML defaults ON (not AUTO): RapidYAML is always obtainable (a preinstalled
+# copy is used if found, otherwise fetched at a pinned tag), so a stock build
+# reads YAML/JSON configs unless explicitly switched off.
+set(CODES_USE_YAML     ON   CACHE STRING "YAML/JSON config front-end via RapidYAML (AUTO/ON/OFF)")
+foreach(_dep DUMPI SWM UNION RECORDER TORCH DARSHAN ZEROMQ YAML)
     set_property(CACHE CODES_USE_${_dep} PROPERTY STRINGS AUTO ON OFF)
 endforeach()
 
@@ -261,6 +265,38 @@ else()
     message(STATUS "ZeroMQ director-client/zmqml surrogate disabled")
 endif()
 
+
+## RapidYAML — parser behind the YAML/JSON config front-end. Unlike the
+## probe-based optional deps above, ryml is always obtainable, so this doesn't
+## "auto-detect and disable if missing": a preinstalled copy is used when found,
+## otherwise it is fetched from source at a pinned tag (bumped by editing the one
+## GIT_TAG line, the same review-a-one-line-bump model used for ROSS). AUTO and
+## ON therefore behave identically; only OFF opts out and drops YAML support.
+set(_yaml_ok FALSE)
+if(NOT CODES_USE_YAML STREQUAL "OFF")
+    find_package(ryml QUIET)
+    if(ryml_FOUND)
+        message(STATUS "RapidYAML found (preinstalled)")
+    else()
+        include(FetchContent)
+        FetchContent_Declare(ryml
+            GIT_REPOSITORY https://github.com/biojppm/rapidyaml.git
+            GIT_TAG v0.9.0
+            # ryml pulls c4core (and its nested submodules) as git submodules;
+            # a shallow clone can miss them, so keep full history for the fetch.
+            GIT_SHALLOW FALSE)
+        FetchContent_MakeAvailable(ryml)
+        message(STATUS "RapidYAML fetched (v0.9.0)")
+    endif()
+    set(_yaml_ok TRUE)
+endif()
+codes_resolve_dep(YAML "${_yaml_ok}" USE_YAML)
+if(USE_YAML)
+    message(STATUS "YAML/JSON config front-end enabled")
+else()
+    message(STATUS "YAML/JSON config front-end disabled")
+endif()
+
 add_subdirectory(src)
 
 
@@ -276,6 +312,7 @@ set(CODES_HAVE_RECORDER ${USE_RECORDER})
 set(CODES_HAVE_TORCH    ${USE_TORCH})
 set(CODES_HAVE_ZEROMQ   ${USE_ZEROMQ})
 set(CODES_HAVE_DARSHAN  ${USE_DARSHAN})
+set(CODES_HAVE_YAML     ${USE_YAML})
 
 configure_file(codes_config.h.cmake.in codes_config.h)
 
