@@ -490,11 +490,27 @@ this, named and defaulted** (`@foo` ⇒ component `foo_net`). So:
   mapping via the prototype `Mapper`. The prototype `Mapper` and its DOT/`node_ids`
   data model are **left behind**; the Wave 4 connectivity workstream harvests their
   connectivity *idea*, not the code (§8).
+- **RapidYAML: vendored and core (not optional).** Since the legacy `.conf` path
+  eventually retires, YAML is not a feature to gate. Vendor ryml's **single-header
+  amalgamation** into `thirdparty/` (Kitware `update-common.sh` convention) and
+  always build it — no `FetchContent`, no
+  submodule, no `CODES_USE_YAML` (AUTO/ON/OFF) knob, no `#if`-guarded fallback in
+  `configuration.c`.
+- **Pure-C++ core, `extern "C"` shim (testability).** The compiler is a pure C++
+  translation unit — `compile(std::string_view) → CompiledConfig`, no ROSS — that
+  **throws** `config_error` on bad input (ryml's error callback throws too). A thin
+  `extern "C"` entry point is the *only* place that translates a failure into
+  `tw_error`/abort. Keeping ROSS out of the core makes the parse/validate/compile
+  logic unit-testable off a `std::string` (below), and gives every future C++
+  subsystem the same C-boundary template.
 - **Scope narrowly:** target `simplep2p` / `simplenet` / synthetic, verified by
-  equivalence — not the entire legacy API on day one.
-- **Unit tests for the compiler** (on the Workstream 6 framework): the validation /
-  derivation / unit-conversion rules, especially the negative paths (contract §12) —
-  they are not reachable by equivalence against a golden `.conf`.
+  equivalence — not the entire legacy API on day one. Flat networks ship as
+  *component + node count*; the Cytoscape graph form waits for a consuming WAN model.
+- **Unit tests for the compiler** (on the Workstream 6 framework), now reachable
+  because the core throws instead of aborting: the `schema_version` gate,
+  reject-unknown-keys, validation / derivation / unit-conversion rules, especially
+  the negative paths (contract §12) — none of which equivalence against a golden
+  `.conf` can reach.
 
 ---
 
