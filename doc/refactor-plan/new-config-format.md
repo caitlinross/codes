@@ -535,15 +535,17 @@ the matrix/connection files — but in stages. This is the scope map for the *en
 config surface, not just topology.
 
 **Covered now** (Phase 3, hand-authored, verified by equivalence):
-- *Enumerated WAN / single-network topology* (simplep2p / simplenet / synthetic):
-  `id`, `component`, per-node overrides, `source`/`target`, `bandwidth`, `latency` —
-  symmetric, per-direction, and per-side egress/ingress all supported (§5.3), mapped
-  onto simplep2p's matrix; component `model`/`type`/params.
+- *Flat single-network topology* (simplep2p / simplenet): a `component` (workload +
+  its NIC model) plus a **node count**, compiled to the model's `LPGROUPS`/`PARAMS`;
+  component `model`/`type`/params; simplep2p's link table **referenced by path** to
+  its existing matrix files. (The Cytoscape graph form — `id`s, `source`/`target`
+  edges, per-node overrides, per-direction/per-side `bandwidth`/`latency` mapped onto
+  an *emitted* matrix — is a new representation with no consuming model yet; it lands
+  in a later phase, below.)
 - *Parametric HPC fabrics* (§5.5): the `fabric` block — `model`, `shape`, per-class
   `links`, `routing`, `packet_size`/`chunk_size`, and (for the file-enumerated
   dragonflies) the `connections:` paths to the **existing** binary files. Compiled to
   the PARAMS the HPC models already read; generation stays with the current scripts.
-- *Single-workload jobs* (§6): the inline-workload shortcut and the `synthetic` source.
 - *`@annotation`*: not user-facing — subsumed by components (the compiler may emit
   annotations internally to drive the existing mapping).
 - *Advanced network knobs* slot in as component/fabric params with no new concept:
@@ -552,9 +554,14 @@ config surface, not just topology.
   `rail_routing`) — prominent-vs-advanced as elsewhere.
 
 **Defined, lands in a later phase:**
-- *Multi-job / trace-driven workloads* (§6.4) → rich placement policies on the
-  **existing jobmap** (a model-level concern, independent of the LP-mapper /
-  connectivity work).
+- *Cytoscape graph topology* (§5.3): the enumerated node/edge form — `id`s,
+  `source`/`target`, per-node overrides, per-direction/per-side `bandwidth`/`latency`
+  compiled to *emitted* simplep2p matrices. Waits for a model that consumes the graph
+  (the WAN model, Phase 4 Wave 4); flat networks ship now as component + node count.
+- *Workloads / jobs* (§6): the inline-workload shortcut and the `synthetic` source
+  first (not yet implemented), then multi-job / trace-driven with rich placement
+  policies on the **existing jobmap** (§6.4) — a model-level concern, independent of
+  the LP-mapper / connectivity work.
 - *`parent` / `groups:` (`TopologyGroup`)* → multi-network / multi-site composition — the
   modern replacement for cross-cluster `@annotation` scoping (the `forwarder`-bridged
   heterogeneous configs live here).
