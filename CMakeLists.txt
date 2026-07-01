@@ -261,6 +261,12 @@ else()
     message(STATUS "ZeroMQ director-client/zmqml surrogate disabled")
 endif()
 
+
+# Vendored third-party dependencies (built before src, which links them). ryml,
+# behind the YAML/JSON config front-end, is vendored here as an always-built
+# single-header drop — see thirdparty/rapidyaml/README.kitware.md.
+add_subdirectory(thirdparty)
+
 add_subdirectory(src)
 
 
