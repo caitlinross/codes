@@ -106,6 +106,20 @@ The compiler derives the group, repetition, and per-router counts from the
 `links` and `routing` onto the model's parameters, and runs the fabric's
 connectivity generation exactly as today.
 
+Supported fabric `model`s are `dragonfly`, `dragonfly-dally`, and `fattree`.
+`dragonfly-dally` is *file-enumerated*: its wiring comes from binary connection
+files produced by the existing generator scripts, referenced by path so the
+model reads them unchanged:
+
+```yaml
+    connections:
+      intra: conf/dragonfly-dally/dfdally-72-intra
+      inter: conf/dragonfly-dally/dfdally-72-inter
+```
+
+For a file-enumerated fabric the `shape` counts are inputs that must stay
+consistent with the connection files.
+
 ## Worked examples in the tree
 
 Each of these YAML files is a twin of the `.conf` beside it, checked in CI to
@@ -114,3 +128,5 @@ produce identical results:
 - `tests/conf/modelnet-test-simplenet.yaml`
 - `tests/conf/modelnet-test-simplep2p.yaml`
 - `src/network-workloads/conf/modelnet-synthetic-dragonfly.yaml`
+- `src/network-workloads/conf/modelnet-synthetic-fattree.yaml`
+- `tests/conf/dragonfly-dally/dfdally-72.yaml.in` (dragonfly-dally)
