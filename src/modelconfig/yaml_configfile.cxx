@@ -96,6 +96,7 @@ struct fabric {
     kv_list shape;                 /* shape parameters (also drive count derivation) */
     std::vector<link_class> links; /* per-link-class bandwidth / vc_size */
     kv_list routing;               /* routing.* (algorithm maps to PARAMS "routing") */
+    kv_list connections;           /* connections.{intra,inter}: file-enumerated wiring */
     kv_list extra;                 /* other scalar fabric keys -> PARAMS verbatim */
     std::string hosts_component;   /* hosts.component: the per-terminal workload */
 };
@@ -119,19 +120,28 @@ struct config {
  * modelnet_order method names, and shape->counts derivation the model expects.
  * ---------------------------------------------------------------------- */
 
+/* The LP layout of one repetition: how many terminals (each a workload LP + NIC
+ * LP) and how many router/switch LPs, plus how many repetitions there are. */
+struct layout {
+    long repetitions;
+    long terminals_per_rep; /* workload + NIC LP count per repetition */
+    long routers_per_rep;   /* router/switch LP count per repetition */
+};
+
 struct fabric_model {
     const char* name;          /* friendly name used in fabric.model */
     const char* terminal_lp;   /* LPGROUPS lp-type name for the NIC/terminal */
-    const char* router_lp;     /* LPGROUPS lp-type name for the router */
+    const char* router_lp;     /* LPGROUPS lp-type name for the router/switch */
     const char* term_method;   /* modelnet_order method name for the terminal */
-    const char* router_method; /* modelnet_order method name for the router */
+    const char* router_method; /* modelnet_order method for the router, or NULL if
+                                  the router is not a separate model-net method */
 
-    /* Derive the layout from the shape parameters: total router repetitions and
-     * the number of compute-node terminals per router. */
-    void (*derive)(const kv_list& shape, long& repetitions, long& cns_per_router);
+    /* Derive the LP layout from the shape parameters. */
+    layout (*derive)(const kv_list& shape);
 };
 
-/* Look up a shape value by name, aborting if absent. */
+/* Look up a shape value by name, aborting if absent. strtol reads the leading
+ * integer, so a per-level "8,8,8" yields its first entry. */
 long shape_int(const kv_list& shape, const char* key) {
     for (const auto& kv : shape)
         if (kv.first == key)
@@ -140,22 +150,54 @@ long shape_int(const kv_list& shape, const char* key) {
     return 0;
 }
 
+/* Look up a shape value by name, returning a default when absent. */
+long shape_int_default(const kv_list& shape, const char* key, long dflt) {
+    for (const auto& kv : shape)
+        if (kv.first == key)
+            return strtol(kv.second.c_str(), nullptr, 10);
+    return dflt;
+}
+
 /* Regular (Kim-Dally) dragonfly: every count follows from num_routers, the
  * number of routers per group -- the same derivation the model does internally
  * (num_cn = num_routers/2, num_groups = num_routers*num_cn + 1). */
-void derive_dragonfly(const kv_list& shape, long& repetitions, long& cns_per_router) {
+layout derive_dragonfly(const kv_list& shape) {
     long num_routers = shape_int(shape, "num_routers");
     if (num_routers <= 0)
         tw_error(TW_LOC, "YAML config error: dragonfly num_routers must be positive");
     long num_cn = num_routers / 2;
     long num_groups = num_routers * num_cn + 1;
-    cns_per_router = num_cn;
-    repetitions = num_groups * num_routers;
+    return {num_groups * num_routers, num_cn, 1};
+}
+
+/* Dragonfly-dally (file-enumerated): the shape counts are genuine inputs that
+ * must match the connection files. total routers = num_groups * num_planes *
+ * num_routers; each router hosts num_cns_per_router terminals. */
+layout derive_dragonfly_dally(const kv_list& shape) {
+    long num_routers = shape_int(shape, "num_routers");
+    long num_groups = shape_int(shape, "num_groups");
+    long num_cns = shape_int(shape, "num_cns_per_router");
+    long num_planes = shape_int_default(shape, "num_planes", 1);
+    return {num_groups * num_planes * num_routers, num_cns, 1};
+}
+
+/* Fat-tree (internally-generated): one repetition per edge switch. Each edge
+ * switch hosts switch_radix/2 terminals, and a repetition carries one switch per
+ * level. The fabric's switch is not a separate model-net method, so only the
+ * terminal appears in modelnet_order. */
+layout derive_fattree(const kv_list& shape) {
+    long switch_count = shape_int(shape, "switch_count");
+    long switch_radix = shape_int(shape, "switch_radix");
+    long num_levels = shape_int(shape, "num_levels");
+    return {switch_count, switch_radix / 2, num_levels};
 }
 
 const fabric_model fabric_models[] = {
     {"dragonfly", "modelnet_dragonfly", "modelnet_dragonfly_router", "dragonfly",
      "dragonfly_router", derive_dragonfly},
+    {"dragonfly-dally", "modelnet_dragonfly_dally", "modelnet_dragonfly_dally_router",
+     "dragonfly_dally", "dragonfly_dally_router", derive_dragonfly_dally},
+    {"fattree", "modelnet_fattree", "fattree_switch", "fattree", nullptr, derive_fattree},
 };
 
 const fabric_model* find_fabric_model(const std::string& name) {
@@ -234,9 +276,9 @@ void parse_fabric(ryml::ConstNodeRef fnode, fabric& fab) {
                 fab.routing.emplace_back(key_of(r), scalar(r));
         } else if (k == "connections") {
             /* file-enumerated dragonflies reference the binary connection files
-             * by path; pass each through to PARAMS verbatim. */
+             * by path; the compiler maps intra/inter to the model's key names. */
             for (ryml::ConstNodeRef cn : c.children())
-                fab.extra.emplace_back(key_of(cn), scalar(cn));
+                fab.connections.emplace_back(key_of(cn), scalar(cn));
         } else if (c.is_keyval())
             fab.extra.emplace_back(k, scalar(c));
     }
@@ -327,29 +369,34 @@ void compile_fabric(const config& cfg, ConfigVTable* cf) {
                  "YAML config error: hosts.component \"%s\" is not defined under components:",
                  fab.hosts_component.c_str());
 
-    long repetitions = 0, cns_per_router = 0;
-    model->derive(fab.shape, repetitions, cns_per_router);
+    layout lay = model->derive(fab.shape);
 
-    /* --- LPGROUPS: one group of `repetitions` router-sized slices, each with
-     * the per-terminal workload + NIC LPs and a single router LP. Emit the
-     * lp-types in [workload, terminal, router] order -- codes_mapping assigns
-     * LP ids in this order, so it must match the layout the model expects. --- */
+    /* --- LPGROUPS: one group of `repetitions` slices, each with the per-terminal
+     * workload + NIC LPs and the router/switch LPs. Emit the lp-types in
+     * [workload, terminal, router] order -- codes_mapping assigns LP ids in this
+     * order, so it must match the layout the model expects. --- */
     SectionHandle lpgroups, grp;
     cf_createSection(cf, ROOT_SECTION, "LPGROUPS", &lpgroups);
     cf_createSection(cf, lpgroups, "MODELNET_GRP", &grp);
 
-    put_key(cf, grp, "repetitions", std::to_string(repetitions));
-    put_key(cf, grp, host->model, std::to_string(cns_per_router));
-    put_key(cf, grp, model->terminal_lp, std::to_string(cns_per_router));
-    put_key(cf, grp, model->router_lp, "1");
+    put_key(cf, grp, "repetitions", std::to_string(lay.repetitions));
+    put_key(cf, grp, host->model, std::to_string(lay.terminals_per_rep));
+    put_key(cf, grp, model->terminal_lp, std::to_string(lay.terminals_per_rep));
+    put_key(cf, grp, model->router_lp, std::to_string(lay.routers_per_rep));
 
     /* --- PARAMS --- */
     SectionHandle params;
     cf_createSection(cf, ROOT_SECTION, "PARAMS", &params);
 
-    /* modelnet_order is derived from the fabric model (terminal then router). */
-    const char* order[2] = {model->term_method, model->router_method};
-    cf_createKey(cf, params, "modelnet_order", order, 2);
+    /* modelnet_order is derived from the fabric model: the terminal, plus the
+     * router when it is a distinct model-net method. */
+    if (model->router_method) {
+        const char* order[2] = {model->term_method, model->router_method};
+        cf_createKey(cf, params, "modelnet_order", order, 2);
+    } else {
+        const char* order[1] = {model->term_method};
+        cf_createKey(cf, params, "modelnet_order", order, 1);
+    }
 
     /* shape parameters pass straight through (num_routers etc.). */
     for (const auto& kv : fab.shape)
@@ -363,6 +410,18 @@ void compile_fabric(const config& cfg, ConfigVTable* cf) {
     /* routing.algorithm -> "routing"; any other routing.* passes through. */
     for (const auto& kv : fab.routing)
         put_key(cf, params, kv.first == "algorithm" ? "routing" : kv.first, kv.second);
+
+    /* connections.{intra,inter} -> the file-enumerated model's connection-file
+     * keys. The paths are passed through verbatim (the model reads them relative
+     * to the working directory). */
+    for (const auto& kv : fab.connections) {
+        if (kv.first == "intra")
+            put_key(cf, params, "intra-group-connections", kv.second);
+        else if (kv.first == "inter")
+            put_key(cf, params, "inter-group-connections", kv.second);
+        else
+            put_key(cf, params, kv.first, kv.second);
+    }
 
     /* remaining scalar fabric keys (packet_size, chunk_size, and parity
      * pass-through knobs) map to PARAMS verbatim. */
