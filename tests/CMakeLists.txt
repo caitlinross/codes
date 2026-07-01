@@ -358,13 +358,14 @@ codes_add_run_test(NAME modelnet-test-slimfly-synthetic BINARY model-net-synthet
     ARGS --sync=1 -- "${_nwconf}/modelnet-synthetic-slimfly-min.conf")
 
 # Config-equivalence harness: run two configs, diff per-LP lp-io output.
-# Proof-of-concept uses the same config twice (must be identical -> also an lp-io
-# determinism check). When the YAML config adapter lands, CONFIG_B becomes the
-# compiled .yaml, giving the old-.conf vs new-.yaml equivalence check.
-codes_add_lpio_equivalence_test(
-    NAME     synthetic-dragonfly-lpio-equivalence
-    BINARY   model-net-synthetic
-    NP       1
-    ARGS     --sync=1 --num_messages=1
-    CONFIG_A "${_nwconf}/modelnet-synthetic-dragonfly.conf"
-    CONFIG_B "${_nwconf}/modelnet-synthetic-dragonfly.conf")
+# The legacy .conf vs its YAML twin -- proves the YAML front-end compiles to a
+# config the dragonfly model runs identically. Only when YAML support is built.
+if(USE_YAML)
+    codes_add_lpio_equivalence_test(
+        NAME     synthetic-dragonfly-lpio-equivalence
+        BINARY   model-net-synthetic
+        NP       1
+        ARGS     --sync=1 --num_messages=1
+        CONFIG_A "${_nwconf}/modelnet-synthetic-dragonfly.conf"
+        CONFIG_B "${_nwconf}/modelnet-synthetic-dragonfly.yaml")
+endif()
