@@ -125,6 +125,15 @@ if(USE_RECORDER)
     list(APPEND SRCS workload/methods/codes-recorder-io-wrkld.c)
 endif()
 
+# YAML/JSON config front-end: compiles the friendly topology/component format
+# down to the same ConfigVTable the .conf text parser produces. Built only when
+# RapidYAML is available.
+if(USE_YAML)
+    list(APPEND SRCS
+        modelconfig/yaml_configfile.h
+        modelconfig/yaml_configfile.cxx)
+endif()
+
 # if(USE_DARSHAN)
 #     list(APPEND SRCS workload/methods/codes-darshan3-io-wrkld.c)
 # endif()
@@ -195,6 +204,14 @@ target_include_directories(codes PUBLIC
 )
 
 target_link_libraries(codes PUBLIC ${LIBS_TO_LINK})
+
+# RapidYAML backs the YAML front-end and is an implementation detail (no public
+# codes header includes ryml), so link it PRIVATE. Wrap in BUILD_INTERFACE: ryml
+# is fetched for the build but not installed, so it must not appear in codes'
+# installed export interface.
+if(USE_YAML)
+    target_link_libraries(codes PRIVATE $<BUILD_INTERFACE:ryml::ryml>)
+endif()
 
 add_executable(topology-test networks/model-net/topology-test.c)
 add_executable(model-net-mpi-replay network-workloads/model-net-mpi-replay.c network-workloads/model-net-mpi-replay-main.c)

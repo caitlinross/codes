@@ -4,6 +4,7 @@
  *
  */
 
+#include "codes_config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,18 @@
 
 #include <codes/configfile.h>
 #include "txt_configfile.h"
+#if CODES_HAVE_YAML
+#include "yaml_configfile.h"
+#endif
+
+/* A .yaml/.yml/.json path selects the YAML config front-end; anything else is
+ * parsed by the legacy .conf text parser. */
+static int config_is_yaml(const char* path) {
+    const char* dot = strrchr(path, '.');
+    if (!dot)
+        return 0;
+    return strcmp(dot, ".yaml") == 0 || strcmp(dot, ".yml") == 0 || strcmp(dot, ".json") == 0;
+}
 
 /*
  * Global to hold configuration in memory
@@ -49,20 +62,34 @@ int configuration_load(const char* filepath, MPI_Comm comm, ConfigHandle* handle
     if (rc != MPI_SUCCESS)
         goto finalize;
 
-#ifdef __APPLE__
-    f = fopen(filepath, "r");
+    if (config_is_yaml(filepath)) {
+#if CODES_HAVE_YAML
+        /* the YAML front-end compiles the friendly format into the same
+         * ConfigVTable the text parser yields, reading the bytes already pulled
+         * in by the collective read above. */
+        *handle = yaml_configfile_load(txtdata, txtsize);
 #else
-    f = fmemopen(txtdata, txtsize, "rb");
+        error = strdup("config error: YAML/JSON configs need YAML support; "
+                       "rebuild with -DCODES_USE_YAML=ON");
+        rc = 1;
+        goto finalize;
 #endif
-    if (!f) {
-        rc = 1;
-        goto finalize;
-    }
+    } else {
+#ifdef __APPLE__
+        f = fopen(filepath, "r");
+#else
+        f = fmemopen(txtdata, txtsize, "rb");
+#endif
+        if (!f) {
+            rc = 1;
+            goto finalize;
+        }
 
-    *handle = txtfile_openStream(f, &error);
-    if (error) {
-        rc = 1;
-        goto finalize;
+        *handle = txtfile_openStream(f, &error);
+        if (error) {
+            rc = 1;
+            goto finalize;
+        }
     }
 
     /* NOTE: posix version overwrites argument :(. */
