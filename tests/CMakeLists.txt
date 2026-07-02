@@ -2,6 +2,24 @@ enable_testing()
 
 configure_file(run-test.sh.in run-test.sh)
 
+# ---------------------------------------------------------------------------
+# GoogleTest unit-test framework (vendored under thirdparty/googletest; built
+# only here, in the test tree — see thirdparty/googletest/README.kitware.md).
+# Provides the GTest::gtest / GTest::gtest_main targets. EXCLUDE_FROM_ALL: the
+# framework compiles only when a unit-test target links it.
+add_subdirectory(
+    "${CMAKE_SOURCE_DIR}/thirdparty/googletest"
+    "${CMAKE_BINARY_DIR}/thirdparty/googletest"
+    EXCLUDE_FROM_ALL)
+
+# Smoke test: proves the vendored framework builds, links, runs, and reports
+# through CTest. Real unit-test consumers land in Phase 3. Unit tests run
+# serially (no MPI), distinct from the mpiexec-launched model tests below.
+add_executable(codes-unit-smoke codes-unit-smoke.cxx)
+target_link_libraries(codes-unit-smoke PRIVATE GTest::gtest_main)
+add_test(NAME codes-unit-smoke COMMAND codes-unit-smoke)
+# ---------------------------------------------------------------------------
+
 # codes_add_equivalence_test — register an equivalence/determinism test.
 #
 # Runs a model binary two or more times and asserts a marker line (default

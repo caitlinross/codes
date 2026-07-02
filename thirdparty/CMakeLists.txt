@@ -6,3 +6,8 @@
 # target. See each package's README.kitware.md for its upstream origin, pinned
 # version, and how to re-import it.
 add_subdirectory(rapidyaml)
+
+# googletest is also vendored here (thirdparty/googletest/) but is test-only: it is
+# add_subdirectory'd from tests/CMakeLists.txt, which runs only under BUILD_TESTING
+# (not yet defined at this point in the top-level configure). See its
+# README.kitware.md.
