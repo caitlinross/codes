@@ -71,6 +71,19 @@ jobs:              # optional: what workloads run and where — multi-job; see �
 surrogate:         # RESERVED: fast network surrogate; see §7
 ```
 
+> **Implementation status (Phase 3 PR1, 2026-07).** The shipped compiler consumes
+> `schema_version`, `components`, and `topology`, plus three CODES-side blocks
+> that landed with PR1 and are documented in the dev reference
+> ([doc/dev/yaml-config.md](../dev/yaml-config.md)): **`sections:`** (verbatim
+> pass-through of model-read config sections — the interim home for surrogate /
+> DIRECTOR / storage config), **`include:`** (one-level file reuse), and a third
+> topology source **`format: groups`** (explicit LP-groups escape hatch, §5.6).
+> `simulation:`, `jobs:`, and `surrogate:` are **not consumed yet** — the strict
+> validator currently rejects them as unknown keys until each lands
+> (phase-3-checklist P3.18, P3.16, and §7 respectively). NetMaestro should treat
+> `sections:`/`include:`/`format: groups` as valid CODES input it may encounter,
+> not as blocks its editor needs to produce.
+
 When NetMaestro exports a `Topology` for a run, it serializes the **components its
 nodes reference** into `components:`, the run settings into `simulation:`, and the
 graph into `topology:`. `jobs:` and `surrogate:` are **authored separately from the
@@ -321,6 +334,17 @@ a second value can only agree (noise) or conflict (a silent bug). The compiler
 *single* knob where it's still sufficient (e.g. `num_groups` instead of `router_radix`),
 but never two names for the same quantity.
 
+> **As implemented (PR1).** The radix-derivation form above is **future sugar,
+> not shipped**. The shipped input sets — documented per model in
+> [doc/dev/yaml-config.md](../dev/yaml-config.md) — take the **counts as the
+> shape** for the file-enumerated dragonflies (`num_routers`, `num_groups`,
+> `num_cns_per_router`, …), because for those models the counts are genuine
+> inputs that must match the connection files (§9 note). Each count is strictly
+> validated (integer, positive, non-degenerate derived layout). If the radix
+> form is added later it must land together with the shape-vs-files cross-check
+> (the §5.5 footgun mitigation), so the two ways of stating the shape can never
+> silently disagree.
+
 Models whose natural inputs are already minimal (fattree, torus, slimfly) have only one
 form. Note the link classes are **model-specific** — dragonfly has `local`/`global`/`cn`,
 fattree has `link`/`cn` — another reason the fabric is tied to its model:
@@ -373,6 +397,19 @@ doesn't build the full utility: have the existing generator script **also emit t
 just wrote — so a single command produces the binary files *and* a matching fabric
 snippet, nothing hand-copied. A compiler-side validation pass (read the files, check the
 implied router/group counts against the declared shape) is a cheaper-still backstop.
+
+### 5.6 Explicit LP-groups source (`format: groups`) — CODES-side escape hatch
+
+Some configs are not a single network at all (a storage cluster, a mapping test,
+several partitions side by side); there is nothing for the compiler to derive.
+For those, `format: groups` lays out the LP groups directly — group name,
+`repetitions`, and an `lps:` map of LP type → count, with `type@annotation` for
+annotated entries — a validated transcription of a legacy `LPGROUPS`, paired
+with a verbatim `params:` block. See [doc/dev/yaml-config.md](../dev/yaml-config.md)
+for the full form. This is a **CODES-side authoring escape hatch**, not part of
+the NetMaestro editor surface: the editor exports enumerated graphs or parametric
+fabrics; `groups` exists so every current `.conf` is expressible in the new
+format during the migration.
 
 ---
 
@@ -486,7 +523,10 @@ surrogate:                              # RESERVED — schema tracks active deve
 it is still being taken beyond a prototype, so the field set above is **indicative, not
 pinned** — it will firm up as the surrogate productionizes. It is captured here so the
 format reserves a home for it; until then a surrogate run may still be configured the
-legacy way. (There is also an `APPLICATION_SURROGATE` counterpart, similarly reserved.)
+legacy way — or, YAML-natively, by carrying the existing `NETWORK_SURROGATE` /
+`APPLICATION_SURROGATE` / `DIRECTOR` sections verbatim under the pass-through
+`sections:` block (§3 note), which the models read unchanged. (The
+`APPLICATION_SURROGATE` counterpart is similarly reserved.)
 
 ---
 
@@ -515,8 +555,14 @@ wrong, so they are rejected (or ignored with a warning) if present:
 |---|---|
 | `message_size` (ROSS event-blob size) | the size of the models' message union |
 | `modelnet_order` | the set of network models present |
-| `pe_mem_factor` | defaulted from the run |
 | repetition / group counts | the topology and component placement |
+
+*(`pe_mem_factor` was originally listed here but is **reclassified** (2026-07): it
+sizes ROSS's per-PE event pool — `g_tw_events_per_pe = factor × LPs-on-PE`, the
+multiplicative sibling of ROSS's additive `--extramem` — and the right value
+depends on the runtime event population, which is not statically derivable. It is
+an **advanced run-tuning knob with a default**, slated for the `simulation:`
+block.)*
 
 For a **parametric fabric** (§5.5), `modelnet_order` is derived from the fabric
 `model`, and the repetition / group / router counts come from the fabric `shape`. (For
@@ -524,7 +570,15 @@ the file-enumerated dragonflies the shape counts are genuine *inputs* the model 
 not derived — and must stay consistent with the connection files; that consistency is
 the footgun §5.5's generator-emits-the-shape recommendation removes.)
 
-> Note: Initially these values will be implemented in the yaml format while we transition away.
+> **Implementation status (2026-07).** `modelnet_order` and the repetition/group
+> counts are **derived since Phase 3 PR1** for both the flat and parametric forms
+> (a guard rejecting a user-written shadow of a derived key is pending —
+> phase-3-checklist P3.10). `message_size` is the exception: it stays
+> **user-written (strictly validated) until Phase 4 Wave 1** — nothing in the C
+> codebase registers per-LP message sizes today, and the typed LP classes of
+> Phase 4 make that registration free, so deriving it earlier would build
+> throwaway machinery. NetMaestro exports should treat `message_size` as a
+> required pass-through until then.
 
 ---
 
@@ -552,6 +606,16 @@ config surface, not just topology.
   `modelnet_scheduler` (incl. `priority` + its sub-options), `num_qos_levels` /
   `qos_bandwidth`, multi-rail / multi-plane (`num_rails`, `rail_select`, `tapering`,
   `rail_routing`) — prominent-vs-advanced as elsewhere.
+- *Explicit LP-groups source* (`format: groups`, §5.6): the CODES-side escape hatch
+  for non-network layouts (storage/lsm, resource, mapping tests) — every current
+  `.conf` is expressible.
+- *Pass-through `sections:`*: config a model reads directly by section name
+  (surrogate/DIRECTOR, `lsm`, `resource`, …) carried through verbatim, with optional
+  open (required-keys-only) schemas; section names matched case-insensitively. This
+  is the "thin pass-through" the output/instrumentation deferral below rides on.
+- *`include:`*: one-level config reuse (components/sections merge by name; topology
+  replaces), read collectively by the loader — a CODES loader feature, invisible to
+  models and not part of the editor export.
 
 **Defined, lands in a later phase:**
 - *Cytoscape graph topology* (§5.3): the enumerated node/edge form — `id`s,

@@ -420,13 +420,15 @@ defaulted.** Concretely:
 
 - **Derived (never written; a hand value would be wrong):** `message_size` (from the
   models' message-union size), `modelnet_order` (from the models present),
-  `pe_mem_factor`, repetition/group counts (from the topology).
+  repetition/group counts (from the topology).
 - **Parameter with a default (always overridable; prominence varies):**
   - *prominent* (physical/experimental): bandwidth & latency, packet/payload size,
     network scale & shape, traffic pattern, workload intensity, end time, and
     **routing** (defaulted but front-and-center — it is a studied variable).
   - *advanced but reachable*: `chunk_size`, VC/buffer sizes, scheduler, low-level
-    timing/queue internals.
+    timing/queue internals, `pe_mem_factor` (reclassified out of the derived set
+    2026-07 — it's ROSS event-pool tuning, the multiplicative sibling of
+    `--extramem`, not statically derivable; contract §9).
 - **Output / instrumentation is dual-owned and a pass-through.** NetMaestro owns
   results/visualization in its flow; a direct-run user configures collection
   themselves. The schema must be able to **enable `lp-io`** (the Phase 1 equivalence
