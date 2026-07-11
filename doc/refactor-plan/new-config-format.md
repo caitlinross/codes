@@ -571,9 +571,10 @@ not derived — and must stay consistent with the connection files; that consist
 the footgun §5.5's generator-emits-the-shape recommendation removes.)
 
 > **Implementation status (2026-07).** `modelnet_order` and the repetition/group
-> counts are **derived since Phase 3 PR1** for both the flat and parametric forms
-> (a guard rejecting a user-written shadow of a derived key is pending —
-> phase-3-checklist P3.10). `message_size` is the exception: it stays
+> counts are **derived since Phase 3 PR1** for both the flat and parametric forms,
+> and since 2026-07-10 a user-written shadow of a derived key (`modelnet_order`
+> via any param pass-through path) is a hard compile error rather than a silent
+> drop. `message_size` is the exception: it stays
 > **user-written (strictly validated) until Phase 4 Wave 1** — nothing in the C
 > codebase registers per-LP message sizes today, and the typed LP classes of
 > Phase 4 make that registration free, so deriving it earlier would build
