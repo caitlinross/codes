@@ -70,6 +70,12 @@ The compiler walks the friendly form and emits the `LPGROUPS` (LP layout) and
 - any scalar key the compiler doesn't special-case is **passed through verbatim**
   to `PARAMS`, so advanced model knobs need no compiler change.
 
+The compiler derives `modelnet_order` from the fabric/network model, so it must
+**not** be set by hand on a flat component or a parametric fabric — doing so would
+otherwise be silently ignored (the compiler-derived value wins), so it is rejected
+as a config error instead. (The explicit-groups form derives nothing, so there you
+write `modelnet_order` yourself under `params:`.)
+
 ---
 
 # Flat networks
