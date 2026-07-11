@@ -544,6 +544,17 @@ where there is no safe convention — but not required. Only dimensionless **cou
 | size | bytes | `"2KiB"`, `"1500B"`, `"4MiB"` | bytes |
 | bandwidth | *(units recommended)* | `"100Gbps"`, `"10Gbps"`, `"2.5GBps"` | per-model (CODES mixes GiB/s and MiB/s today) |
 
+> **Implementation status (2026-07-10).** Implemented as specified. The
+> accepted suffix set, the per-model internal-unit table (bandwidth diverges:
+> GiB/s for the dragonfly family / torus / express-mesh / slimfly, bytes-per-ns
+> for fattree, MiB/s for simplenet's `net_bw_mbps`), and the semantics for bare
+> numbers are documented in [doc/dev/yaml-config.md](../dev/yaml-config.md).
+> Two sharp edges resolved in implementation: a **bare bandwidth number passes
+> through in the model's internal unit** (no universal default is safe — write
+> explicit units), and a unit-suffixed value on a param the compiler cannot
+> classify is a **compile error** (models read params with `atof`-style parsers
+> that would silently truncate `"100Gbps"` to `100`).
+
 ---
 
 ## 9. Derived values — never written in this file
