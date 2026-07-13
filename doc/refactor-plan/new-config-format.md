@@ -503,6 +503,20 @@ around it, but it lands in stages:
   the way the legacy `allocation-cont.conf` / `alloc_file` flow does, rather than
   introducing a second allocator.
 
+> **Implementation status (2026-07-11).** The inline `workload:` shortcut and
+> the `synthetic` source are wired end-to-end: params are units-aware, land in
+> a compiled `WORKLOAD` section, and the synthetic executables apply them with
+> **CLI > config > default** precedence. The full `jobs:` schema above is
+> parsed and validated (unique ids, placement forms, double-booking and
+> ranks-vs-slots checks); a single all-nodes job desugars to exactly the
+> inline form. Non-`synthetic` workload types and the `qos:` key are
+> recognized but rejected with "not yet configurable from this format" — keep
+> using the legacy flow for those. **Multi-job execution is not wired yet**:
+> multi-job configs compile to a `JOBS` section, but the synthetic executables
+> abort with guidance rather than silently running one global pattern; the
+> follow-up executor will consume `JOBS` via the existing `codes-jobmap`. See
+> [doc/dev/yaml-config.md](../dev/yaml-config.md) for the authored reference.
+
 ---
 
 ## 7. Surrogate (`surrogate:`) — reserved
