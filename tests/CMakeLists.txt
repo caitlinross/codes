@@ -247,6 +247,60 @@ function(codes_add_lpio_equivalence_test)
         WORKING_DIRECTORY "${CODES_BINARY_DIR}")
 endfunction()
 
+# codes_add_binary_equivalence_test — assert two *binaries* drive the *same*
+# config to identical results. The mirror of codes_add_lpio_equivalence_test
+# (one binary, two configs): here two binaries run the one config and are
+# compared. The use case is proving an alternate entry point (e.g. the
+# orchestrator-driven twin of a model) equivalent to the original binary.
+#
+# Always compares the marker line ("Net Events Processed" by default -- the
+# committed event count, deterministic across sync modes). With LPIO it also
+# diffs the per-LP lp-io output (each run writes to its own run-N/lp-io dir),
+# the stronger check for models whose lp-io is reproducible.
+#
+#   codes_add_binary_equivalence_test(
+#       NAME     <ctest name>
+#       BINARY_A <CMake target>          # e.g. the original model binary
+#       BINARY_B <CMake target>          # e.g. the orchestrator-driven twin
+#       CONFIG   <path>                  # the one config both run
+#       [NP      <ranks>]                # default 1
+#       [ARGS    <args shared by both runs, before the config>]
+#       [MARKER  <line to compare>]      # default "Net Events Processed"
+#       [LPIO])                          # also diff per-LP lp-io output
+function(codes_add_binary_equivalence_test)
+    cmake_parse_arguments(T "LPIO" "NAME;BINARY_A;BINARY_B;NP;CONFIG;MARKER" "ARGS" ${ARGN})
+    if(NOT T_NAME OR NOT T_BINARY_A OR NOT T_BINARY_B OR NOT T_CONFIG)
+        message(FATAL_ERROR
+            "codes_add_binary_equivalence_test: NAME, BINARY_A, BINARY_B and CONFIG are required")
+    endif()
+    if(NOT T_NP)
+        set(T_NP 1)
+    endif()
+    if(NOT T_MARKER)
+        set(T_MARKER "Net Events Processed")
+    endif()
+    set(_bin_a  "$<TARGET_FILE:${T_BINARY_A}>")
+    set(_bin_b  "$<TARGET_FILE:${T_BINARY_B}>")
+    set(_launch ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} ${T_NP} ${MPIEXEC_PREFLAGS})
+    set(_lpio_opt "")
+    set(_lpio_arg "")
+    if(T_LPIO)
+        # Each run writes lp-io into its own run-N/lp-io subdir (lp_io_prepare
+        # aborts if the dir exists, so it must be relative + per-run-isolated).
+        set(_lpio_opt --lp-io lp-io)
+        set(_lpio_arg --lp-io-dir=lp-io)
+    endif()
+    set(_run_a ${_launch} "${_bin_a}" ${T_ARGS} ${_lpio_arg} ${MPIEXEC_POSTFLAGS} -- "${T_CONFIG}")
+    set(_run_b ${_launch} "${_bin_b}" ${T_ARGS} ${_lpio_arg} ${MPIEXEC_POSTFLAGS} -- "${T_CONFIG}")
+    add_test(NAME ${T_NAME}
+        COMMAND "${CMAKE_CURRENT_BINARY_DIR}/run-test.sh"
+                bash "${CMAKE_CURRENT_SOURCE_DIR}/equivalence-run.sh"
+                --marker "${T_MARKER}" ${_lpio_opt}
+                @@ ${_run_a}
+                @@ ${_run_b}
+        WORKING_DIRECTORY "${CODES_BINARY_DIR}")
+endfunction()
+
 # codes_add_config_equivalence_test — assert two configs drive a model to the
 # same committed work, comparing a marker line rather than lp-io. The fallback
 # for the cases where a per-LP lp-io diff can't be used: the binary emits no
@@ -369,6 +423,13 @@ target_link_libraries(codes-workload-test PUBLIC codes)
 # by codes_add_config_tree_test below.
 add_executable(config-tree-equivalence-test config-tree-equivalence-test.c)
 target_link_libraries(config-tree-equivalence-test PUBLIC codes)
+
+# Orchestrator-driven twin of modelnet-test: runs the identical simulation but
+# drives the setup sequence through codes::orchestrator (codes/orchestrator.h).
+# The executable-equivalence tests below compare it against modelnet-test on the
+# same config.
+add_executable(modelnet-orchestrator-test modelnet-orchestrator-test.cxx)
+target_link_libraries(modelnet-orchestrator-test PUBLIC codes)
 
 # Tests are also not consistent with the files to compile, but
 # that's ok, there are more tests than binary files
@@ -563,6 +624,36 @@ codes_add_lpio_equivalence_test(
     ARGS     --sync=1
     CONFIG_A "${_tconf}/modelnet-test-simplenet.conf"
     CONFIG_B "${_tconf}/modelnet-test-simplenet.yaml")
+
+# Orchestrator entry-point equivalence: modelnet-orchestrator-test drives the
+# same simplenet simulation as modelnet-test but through codes::orchestrator.
+# Run both binaries on the one config and diff their per-LP lp-io output (plus
+# the marker) -- proving the orchestrator setup path produces byte-identical
+# results to the hand-written main. Run for both the .conf and its YAML twin,
+# and once multi-rank optimistic (np 2, sync=3) to exercise the orchestrator
+# under a parallel run (marker-only there: the committed event count is the
+# sync-mode-independent invariant).
+codes_add_binary_equivalence_test(
+    NAME     orchestrator-simplenet-equivalence-conf
+    BINARY_A modelnet-test
+    BINARY_B modelnet-orchestrator-test
+    ARGS     --sync=1
+    CONFIG   "${_tconf}/modelnet-test-simplenet.conf"
+    LPIO)
+codes_add_binary_equivalence_test(
+    NAME     orchestrator-simplenet-equivalence-yaml
+    BINARY_A modelnet-test
+    BINARY_B modelnet-orchestrator-test
+    ARGS     --sync=1
+    CONFIG   "${_tconf}/modelnet-test-simplenet.yaml"
+    LPIO)
+codes_add_binary_equivalence_test(
+    NAME     orchestrator-simplenet-equivalence-optimistic
+    BINARY_A modelnet-test
+    BINARY_B modelnet-orchestrator-test
+    NP       2
+    ARGS     --sync=3
+    CONFIG   "${_tconf}/modelnet-test-simplenet.conf")
 codes_add_lpio_equivalence_test(
     NAME     loggp-config-equivalence
     BINARY   modelnet-test
