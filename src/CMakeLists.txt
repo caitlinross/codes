@@ -108,6 +108,12 @@ list(APPEND SRCS
     modelconfig/config_emitter.cxx
     modelconfig/yaml_configfile.h
     modelconfig/yaml_configfile.cxx
+
+    # Orchestrator: an alternate CODES entry point that runs the fixed setup
+    # sequence (config load, LP-type registration, model_net_register,
+    # codes_mapping_setup, model_net_configure, net-id distribution) behind a
+    # name-keyed registry + one configure call. Public header: codes/orchestrator.h.
+    orchestrator/orchestrator.cxx
 )
 
 list(APPEND LIBS_TO_LINK ROSS::ROSS)
